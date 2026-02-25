@@ -11,16 +11,6 @@ export async function GET(request: NextRequest) {
     const lon = searchParams.get("lon");
     const q = searchParams.get("q");
 
-    const query = q || (lat && lon ? `${lat},${lon}` : null);
-
-    if (!query) {
-      const error = createApiError("INVALID_REQUEST", 400);
-      return NextResponse.json<ApiResponse<null>>(
-        { success: false, error: error.toJSON() },
-        { status: 400 }
-      );
-    }
-
     const apiKey = process.env.WEATHER_API_KEY;
     if (!apiKey || apiKey === "your_api_key_here") {
       return NextResponse.json<ApiResponse<null>>(
@@ -29,32 +19,58 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const url = `${WEATHER_API_BASE_URL}/forecast.json?key=${apiKey}&q=${encodeURIComponent(query)}&days=7&aqi=no&alerts=no&lang=ko`;
+    let currentUrl: string;
+    let forecastUrl: string;
 
-    const response = await fetch(url, {
-      next: { revalidate: 600 },
-    });
+    if (lat && lon) {
+      currentUrl = `${WEATHER_API_BASE_URL}/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=kr`;
+      forecastUrl = `${WEATHER_API_BASE_URL}/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=kr`;
+    } else if (q) {
+      currentUrl = `${WEATHER_API_BASE_URL}/weather?q=${encodeURIComponent(q)}&appid=${apiKey}&units=metric&lang=kr`;
+      forecastUrl = `${WEATHER_API_BASE_URL}/forecast?q=${encodeURIComponent(q)}&appid=${apiKey}&units=metric&lang=kr`;
+    } else {
+      const error = createApiError("INVALID_REQUEST", 400);
+      return NextResponse.json<ApiResponse<null>>(
+        { success: false, error: error.toJSON() },
+        { status: 400 }
+      );
+    }
 
-    if (!response.ok) {
-      if (response.status === 400) {
+    const [currentResponse, forecastResponse] = await Promise.all([
+      fetch(currentUrl, { next: { revalidate: 600 } }),
+      fetch(forecastUrl, { next: { revalidate: 600 } }),
+    ]);
+
+    if (!currentResponse.ok) {
+      if (currentResponse.status === 404) {
         const error = createApiError("NOT_FOUND", 404);
         return NextResponse.json<ApiResponse<null>>(
           { success: false, error: error.toJSON() },
           { status: 404 }
         );
       }
-      if (response.status === 403) {
+      if (currentResponse.status === 401) {
+        return NextResponse.json<ApiResponse<null>>(
+          { success: false, error: { code: "AUTH_ERROR", message: "API 키가 유효하지 않습니다." } },
+          { status: 401 }
+        );
+      }
+      if (currentResponse.status === 429) {
         const error = createApiError("RATE_LIMIT", 429);
         return NextResponse.json<ApiResponse<null>>(
           { success: false, error: error.toJSON() },
           { status: 429 }
         );
       }
-      throw new Error(`API responded with status ${response.status}`);
+      throw new Error(`API responded with status ${currentResponse.status}`);
     }
 
-    const data = await response.json();
-    const weatherData = mapWeatherData(data);
+    const [currentData, forecastData] = await Promise.all([
+      currentResponse.json(),
+      forecastResponse.json(),
+    ]);
+
+    const weatherData = mapWeatherData(currentData, forecastData);
 
     return NextResponse.json<ApiResponse<WeatherData>>({
       success: true,

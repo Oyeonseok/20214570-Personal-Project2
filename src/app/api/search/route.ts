@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mapSearchResults } from "@/lib/weather-mapper";
 import { createApiError, handleApiError } from "@/lib/api-error";
-import { WEATHER_API_BASE_URL } from "@/lib/constants";
+import { GEO_API_BASE_URL } from "@/lib/constants";
 import { ApiResponse, Location } from "@/types/weather";
 
 export async function GET(request: NextRequest) {
@@ -25,18 +25,18 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const url = `${WEATHER_API_BASE_URL}/search.json?key=${apiKey}&q=${encodeURIComponent(q)}`;
+    const url = `${GEO_API_BASE_URL}/direct?q=${encodeURIComponent(q)}&limit=5&appid=${apiKey}`;
 
     const response = await fetch(url, {
       next: { revalidate: 3600 },
     });
 
     if (!response.ok) {
-      if (response.status === 400) {
-        return NextResponse.json<ApiResponse<Location[]>>({
-          success: true,
-          data: [],
-        });
+      if (response.status === 401) {
+        return NextResponse.json<ApiResponse<null>>(
+          { success: false, error: { code: "AUTH_ERROR", message: "API 키가 유효하지 않습니다." } },
+          { status: 401 }
+        );
       }
       throw new Error(`API responded with status ${response.status}`);
     }

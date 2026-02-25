@@ -5,150 +5,158 @@ import {
   DailyForecastItem,
   WeatherData,
 } from "@/types/weather";
-import { WEATHER_CONDITIONS } from "./constants";
+import { WEATHER_CONDITIONS, WEATHER_ICON_MAP } from "./constants";
 
-interface WeatherApiLocation {
+interface OpenWeatherCurrentResponse {
+  coord: { lat: number; lon: number };
+  weather: Array<{ id: number; main: string; description: string; icon: string }>;
+  main: {
+    temp: number;
+    feels_like: number;
+    temp_min: number;
+    temp_max: number;
+    humidity: number;
+  };
+  wind: { speed: number };
   name: string;
-  region: string;
-  country: string;
+  sys: { country: string };
+}
+
+interface OpenWeatherForecastItem {
+  dt: number;
+  main: {
+    temp: number;
+    feels_like: number;
+    temp_min: number;
+    temp_max: number;
+    humidity: number;
+  };
+  weather: Array<{ id: number; main: string; description: string; icon: string }>;
+  pop: number;
+  dt_txt: string;
+}
+
+interface OpenWeatherForecastResponse {
+  list: OpenWeatherForecastItem[];
+  city: {
+    name: string;
+    country: string;
+    coord: { lat: number; lon: number };
+  };
+}
+
+interface OpenWeatherGeoResponse {
+  name: string;
+  local_names?: Record<string, string>;
   lat: number;
   lon: number;
-  localtime: string;
-}
-
-interface WeatherApiCurrent {
-  temp_c: number;
-  temp_f: number;
-  feelslike_c: number;
-  feelslike_f: number;
-  humidity: number;
-  wind_kph: number;
-  condition: {
-    text: string;
-    icon: string;
-    code: number;
-  };
-}
-
-interface WeatherApiForecastDay {
-  date: string;
-  day: {
-    maxtemp_c: number;
-    mintemp_c: number;
-    avgtemp_c: number;
-    daily_chance_of_rain: number;
-    condition: {
-      text: string;
-      icon: string;
-      code: number;
-    };
-  };
-  hour: WeatherApiHour[];
-}
-
-interface WeatherApiHour {
-  time: string;
-  temp_c: number;
-  condition: {
-    text: string;
-    icon: string;
-    code: number;
-  };
-  chance_of_rain: number;
-}
-
-interface WeatherApiResponse {
-  location: WeatherApiLocation;
-  current: WeatherApiCurrent;
-  forecast?: {
-    forecastday: WeatherApiForecastDay[];
-  };
-}
-
-interface WeatherApiSearchResult {
-  id: number;
-  name: string;
-  region: string;
   country: string;
-  lat: number;
-  lon: number;
+  state?: string;
 }
 
-export function mapLocation(apiLocation: WeatherApiLocation): Location {
+export function mapLocation(
+  current: OpenWeatherCurrentResponse
+): Location {
   return {
-    name: apiLocation.name,
-    country: apiLocation.country,
-    region: apiLocation.region,
-    lat: apiLocation.lat,
-    lon: apiLocation.lon,
+    name: current.name,
+    country: current.sys.country,
+    lat: current.coord.lat,
+    lon: current.coord.lon,
   };
 }
 
 export function mapCurrentWeather(
-  apiCurrent: WeatherApiCurrent,
-  forecastDay?: WeatherApiForecastDay
+  current: OpenWeatherCurrentResponse
 ): CurrentWeather {
-  const conditionCode = apiCurrent.condition.code;
-  const localCondition = WEATHER_CONDITIONS[conditionCode] || apiCurrent.condition.text;
+  const weather = current.weather[0];
+  const condition = WEATHER_CONDITIONS[weather.main] || weather.description;
+  const iconUrl = WEATHER_ICON_MAP[weather.icon] || `https://openweathermap.org/img/wn/${weather.icon}@2x.png`;
 
   return {
-    temp: Math.round(apiCurrent.temp_c),
-    feelsLike: Math.round(apiCurrent.feelslike_c),
-    condition: localCondition,
-    conditionCode: conditionCode,
-    iconCode: apiCurrent.condition.icon,
-    humidity: apiCurrent.humidity,
-    windSpeed: Math.round(apiCurrent.wind_kph),
-    tempMin: forecastDay ? Math.round(forecastDay.day.mintemp_c) : undefined,
-    tempMax: forecastDay ? Math.round(forecastDay.day.maxtemp_c) : undefined,
+    temp: Math.round(current.main.temp),
+    feelsLike: Math.round(current.main.feels_like),
+    condition: condition,
+    conditionCode: weather.id,
+    iconCode: iconUrl,
+    humidity: current.main.humidity,
+    windSpeed: Math.round(current.wind.speed * 3.6),
+    tempMin: Math.round(current.main.temp_min),
+    tempMax: Math.round(current.main.temp_max),
     updatedAt: new Date().toISOString(),
   };
 }
 
-export function mapHourlyForecast(hours: WeatherApiHour[]): HourlyForecastItem[] {
-  const now = new Date();
-  
-  return hours
-    .filter((hour) => new Date(hour.time) >= now)
-    .slice(0, 24)
-    .map((hour) => ({
-      time: hour.time,
-      temp: Math.round(hour.temp_c),
-      condition: WEATHER_CONDITIONS[hour.condition.code] || hour.condition.text,
-      iconCode: hour.condition.icon,
-      precipitationProbability: hour.chance_of_rain,
-    }));
+export function mapHourlyForecast(
+  forecast: OpenWeatherForecastResponse
+): HourlyForecastItem[] {
+  return forecast.list.slice(0, 8).map((item) => {
+    const weather = item.weather[0];
+    const iconUrl = WEATHER_ICON_MAP[weather.icon] || `https://openweathermap.org/img/wn/${weather.icon}@2x.png`;
+
+    return {
+      time: item.dt_txt,
+      temp: Math.round(item.main.temp),
+      condition: WEATHER_CONDITIONS[weather.main] || weather.description,
+      iconCode: iconUrl,
+      precipitationProbability: Math.round(item.pop * 100),
+    };
+  });
 }
 
-export function mapDailyForecast(forecastDays: WeatherApiForecastDay[]): DailyForecastItem[] {
-  return forecastDays.map((day) => ({
-    date: day.date,
-    tempMin: Math.round(day.day.mintemp_c),
-    tempMax: Math.round(day.day.maxtemp_c),
-    condition: WEATHER_CONDITIONS[day.day.condition.code] || day.day.condition.text,
-    iconCode: day.day.condition.icon,
-    precipitationProbability: day.day.daily_chance_of_rain,
-  }));
+export function mapDailyForecast(
+  forecast: OpenWeatherForecastResponse
+): DailyForecastItem[] {
+  const dailyMap = new Map<string, OpenWeatherForecastItem[]>();
+
+  forecast.list.forEach((item) => {
+    const date = item.dt_txt.split(" ")[0];
+    if (!dailyMap.has(date)) {
+      dailyMap.set(date, []);
+    }
+    dailyMap.get(date)!.push(item);
+  });
+
+  const dailyForecasts: DailyForecastItem[] = [];
+
+  dailyMap.forEach((items, date) => {
+    const temps = items.map((i) => i.main.temp);
+    const minTemp = Math.min(...temps);
+    const maxTemp = Math.max(...temps);
+    const midItem = items[Math.floor(items.length / 2)];
+    const weather = midItem.weather[0];
+    const iconUrl = WEATHER_ICON_MAP[weather.icon] || `https://openweathermap.org/img/wn/${weather.icon}@2x.png`;
+    const avgPop = items.reduce((sum, i) => sum + i.pop, 0) / items.length;
+
+    dailyForecasts.push({
+      date: date,
+      tempMin: Math.round(minTemp),
+      tempMax: Math.round(maxTemp),
+      condition: WEATHER_CONDITIONS[weather.main] || weather.description,
+      iconCode: iconUrl,
+      precipitationProbability: Math.round(avgPop * 100),
+    });
+  });
+
+  return dailyForecasts.slice(0, 5);
 }
 
-export function mapWeatherData(apiResponse: WeatherApiResponse): WeatherData {
-  const forecastDays = apiResponse.forecast?.forecastday || [];
-  const allHours = forecastDays.flatMap((day) => day.hour);
-
+export function mapWeatherData(
+  current: OpenWeatherCurrentResponse,
+  forecast: OpenWeatherForecastResponse
+): WeatherData {
   return {
-    location: mapLocation(apiResponse.location),
-    current: mapCurrentWeather(apiResponse.current, forecastDays[0]),
-    hourly: mapHourlyForecast(allHours),
-    daily: mapDailyForecast(forecastDays),
+    location: mapLocation(current),
+    current: mapCurrentWeather(current),
+    hourly: mapHourlyForecast(forecast),
+    daily: mapDailyForecast(forecast),
   };
 }
 
-export function mapSearchResults(results: WeatherApiSearchResult[]): Location[] {
+export function mapSearchResults(results: OpenWeatherGeoResponse[]): Location[] {
   return results.map((result) => ({
-    id: String(result.id),
-    name: result.name,
+    name: result.local_names?.ko || result.name,
     country: result.country,
-    region: result.region,
+    region: result.state,
     lat: result.lat,
     lon: result.lon,
   }));
